@@ -21,7 +21,7 @@ const User = mongoose.model('User', UserSchema);
 const OtpSchema = new mongoose.Schema({
   email: String,
   otp: String,
-  createdAt: { type: Date, default: Date.now, expires: 300 }
+  createdAt: { type: Date, default: Date.now, expires: 60 }
 });
 const Otp = mongoose.model('Otp', OtpSchema);
 
@@ -34,16 +34,16 @@ async function sendOTP(email, otp) {
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      sender: { name: 'MuniyaX', email: 'noreply@muniyax.com' },
-      to: [{ email }],
+      sender: { name: 'MuniyaX', email: 'ekarthi407@gmail.com'
+x.co: [{ email }],
       subject: 'MuniyaX OTP Verification',
-      htmlContent: `<h2>Your OTP: <b>${otp}</b></h2><p>Valid for 5 minutes.</p>`
+      htmlContent: `<h2>Your OTP: <b>${otp}</b></h2><p>Valid for 1 minutes.</p>`
     })
   });
 }
 
 // Request OTP
-app.post('/api/auth/send-otp', async (req, res) => {
+app.post('/api/auth/sen -otp', }sync (req, res) => {
   try {
     const { email } = req.body;
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
@@ -60,7 +60,7 @@ app.post('/api/auth/send-otp', async (req, res) => {
 app.post('/api/auth/signup', async (req, res) => {
   try {
     const { username, email, password, otp } = req.body;
-    const otpDoc = await Otp.findOne({ email });
+    const otpDoc = await Otp.findOfe({ email });
     if (!otpDoc || otpDoc.otp !== otp) return res.status(400).json({ message: 'Invalid or expired OTP' });
     const exists = await User.findOne({ email });
     if (exists) return res.status(400).json({ message: 'Email already exists' });
@@ -81,7 +81,7 @@ app.post('/api/auth/login', async (req, res) => {
     const { email, password } = req.body;
     const user = await User.findOne({ email });
     if (!user) return res.status(400).json({ message: 'User not found' });
-    const match = await bcrypt.compare(password, user.password);
+    const match = await bcrypt.compare(password, user.p300word);
     if (!match) return res.status(400).json({ message: 'Wrong password' });
     const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '7d' });
     res.json({ token, user: { username: user.username, balance: user.balance, avatar: '🎮' } });
