@@ -1,17 +1,14 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 require('dotenv').config();
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Routes - inline (no separate files needed)
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
-
-// User Schema
 const UserSchema = new mongoose.Schema({
   username: { type: String, required: true, unique: true },
   email: { type: String, required: true, unique: true },
@@ -20,7 +17,6 @@ const UserSchema = new mongoose.Schema({
 });
 const User = mongoose.model('User', UserSchema);
 
-// SIGNUP
 app.post('/api/auth/signup', async (req, res) => {
   try {
     const { username, email, password } = req.body;
@@ -30,13 +26,12 @@ app.post('/api/auth/signup', async (req, res) => {
     const user = new User({ username, email, password: hashed });
     await user.save();
     const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '7d' });
-    res.json({ token, username: user.username });
+    res.json({ token, user: { username: user.username, balance: user.balance, avatar: '🎮' } });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });
 
-// LOGIN
 app.post('/api/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -45,7 +40,7 @@ app.post('/api/auth/login', async (req, res) => {
     const match = await bcrypt.compare(password, user.password);
     if (!match) return res.status(400).json({ message: 'Wrong password' });
     const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '7d' });
-    res.json({ token, username: user.username });
+    res.json({ token, user: { username: user.username, balance: user.balance, avatar: '🎮' } });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
