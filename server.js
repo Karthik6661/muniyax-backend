@@ -87,26 +87,21 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-// Google OAuth Route
 app.post('/api/auth/google', async (req, res) => {
   try {
-    const { googleId, email, name } = req.body;
+    const { credential } = req.body;
+    if (!credential) return res.status(400).json({ message: 'No credential' });
+    const payload = JSON.parse(Buffer.from(credential.split('.')[1], 'base64').toString());
+    const { sub: googleId, email, name } = payload;
     if (!googleId || !email) return res.status(400).json({ message: 'Invalid Google data' });
-
     let user = await User.findOne({ email });
-
     if (user) {
-      if (!user.googleId) {
-        user.googleId = googleId;
-        user.verified = true;
-        await user.save();
-      }
+      if (!user.googleId) { user.googleId = googleId; user.verified = true; await user.save(); }
     } else {
       const username = name.replace(/\s+/g, '').toLowerCase() + Math.floor(Math.random() * 1000);
       user = new User({ username, email, googleId, verified: true, balance: 10000 });
       await user.save();
     }
-
     const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '7d' });
     res.json({ token, user: { username: user.username, balance: user.balance, avatar: '🎮' } });
   } catch (err) {
