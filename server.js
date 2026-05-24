@@ -12,7 +12,8 @@ app.use(express.json());
 const UserSchema = new mongoose.Schema({
   username: { type: String, required: true, unique: true },
   email: { type: String, required: true, unique: true },
-  password: { type: String, required: true },
+  password: { type: String },
+  googleId: { type: String },
   balance: { type: Number, default: 10000 },
   verified: { type: Boolean, default: false }
 });
@@ -79,6 +80,33 @@ app.post('/api/auth/login', async (req, res) => {
     if (!user) return res.status(400).json({ message: 'User not found' });
     const match = await bcrypt.compare(password, user.password);
     if (!match) return res.status(400).json({ message: 'Wrong password' });
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '7d' });
+    res.json({ token, user: { username: user.username, balance: user.balance, avatar: '🎮' } });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Google OAuth Route
+app.post('/api/auth/google', async (req, res) => {
+  try {
+    const { googleId, email, name } = req.body;
+    if (!googleId || !email) return res.status(400).json({ message: 'Invalid Google data' });
+
+    let user = await User.findOne({ email });
+
+    if (user) {
+      if (!user.googleId) {
+        user.googleId = googleId;
+        user.verified = true;
+        await user.save();
+      }
+    } else {
+      const username = name.replace(/\s+/g, '').toLowerCase() + Math.floor(Math.random() * 1000);
+      user = new User({ username, email, googleId, verified: true, balance: 10000 });
+      await user.save();
+    }
+
     const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '7d' });
     res.json({ token, user: { username: user.username, balance: user.balance, avatar: '🎮' } });
   } catch (err) {
