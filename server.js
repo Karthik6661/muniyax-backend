@@ -15,7 +15,8 @@ const UserSchema = new mongoose.Schema({
   password: { type: String },
   googleId: { type: String },
   balance: { type: Number, default: 10000 },
-  verified: { type: Boolean, default: false }
+  verified: { type: Boolean, default: false },
+  banned: { type: Boolean, default: false }
 });
 const User = mongoose.model('User', UserSchema);
 
@@ -78,6 +79,7 @@ app.post('/api/auth/login', async (req, res) => {
     const { email, password } = req.body;
     const user = await User.findOne({ email });
     if (!user) return res.status(400).json({ message: 'User not found' });
+    if (user.banned) return res.status(403).json({ message: 'Account banned' });
     const match = await bcrypt.compare(password, user.password);
     if (!match) return res.status(400).json({ message: 'Wrong password' });
     const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '7d' });
@@ -96,6 +98,7 @@ app.post('/api/auth/google', async (req, res) => {
     if (!googleId || !email) return res.status(400).json({ message: 'Invalid Google data' });
     let user = await User.findOne({ email });
     if (user) {
+      if (user.banned) return res.status(403).json({ message: 'Account banned' });
       if (!user.googleId) { user.googleId = googleId; user.verified = true; await user.save(); }
     } else {
       const username = name.replace(/\s+/g, '').toLowerCase() + Math.floor(Math.random() * 1000);
@@ -104,6 +107,76 @@ app.post('/api/auth/google', async (req, res) => {
     }
     const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '7d' });
     res.json({ token, user: { username: user.username, balance: user.balance, avatar: '🎮' } });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Admin middleware
+function adminAuth(req, res, next) {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) return res.status(401).json({ message: 'No token' });
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    if (decoded.role !== 'admin') return res.status(403).json({ message: 'Not admin' });
+    req.admin = decoded;
+    next();
+  } catch {
+    res.status(401).json({ message: 'Invalid token' });
+  }
+}
+
+// Admin login
+app.post('/api/admin/login', (req, res) => {
+  const { password } = req.body;
+  if (password !== process.env.ADMIN_PASSWORD) return res.status(401).json({ message: 'Wrong password' });
+  const token = jwt.sign({ role: 'admin' }, process.env.JWT_SECRET, { expiresIn: '1d' });
+  res.json({ token });
+});
+
+// Admin stats
+app.get('/api/admin/stats', adminAuth, async (req, res) => {
+  try {
+    const totalUsers = await User.countDocuments();
+    const bannedUsers = await User.countDocuments({ banned: true });
+    const totalBalance = await User.aggregate([{ $group: { _id: null, total: { $sum: '$balance' } } }]);
+    const today = new Date(); today.setHours(0,0,0,0);
+    res.json({ totalUsers, bannedUsers, totalBalance: totalBalance[0]?.total || 0 });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Get all users
+app.get('/api/admin/users', adminAuth, async (req, res) => {
+  try {
+    const users = await User.find({}, 'username email balance verified banned createdAt');
+    res.json(users);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Ban/unban user
+app.put('/api/admin/users/:id/ban', adminAuth, async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    user.banned = !user.banned;
+    await user.save();
+    res.json({ message: user.banned ? 'User banned' : 'User unbanned', banned: user.banned });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Edit balance
+app.put('/api/admin/users/:id/balance', adminAuth, async (req, res) => {
+  try {
+    const { balance } = req.body;
+    const user = await User.findByIdAndUpdate(req.params.id, { balance }, { new: true });
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    res.json({ message: 'Balance updated', balance: user.balance });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
