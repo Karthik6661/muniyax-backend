@@ -181,7 +181,27 @@ app.put('/api/admin/users/:id/balance', adminAuth, async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 });
+function authUser(req, res, next) {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) return res.status(401).json({ message: 'No token' });
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.userId = decoded.id;
+    next();
+  } catch {
+    res.status(401).json({ message: 'Invalid token' });
+  }
+}
 
+app.get('/api/user/me', authUser, async (req, res) => {
+  try {
+    const user = await User.findById(req.userId, 'username email balance');
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    res.json({ username: user.username, email: user.email, balance: user.balance });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
 app.get('/', (req, res) => res.json({ message: 'MuniyaX Backend Running!' }));
 
 mongoose.connect(process.env.MONGODB_URI)
