@@ -9,6 +9,7 @@ const app = express();
 app.use(cors({ origin: '*', methods: ['GET','POST','PUT','DELETE'], allowedHeaders: ['Content-Type','Authorization'] }));
 app.use(express.json());
 
+// ── USER SCHEMA ──
 const UserSchema = new mongoose.Schema({
   username: { type: String, required: true, unique: true },
   email: { type: String, required: true, unique: true },
@@ -19,6 +20,14 @@ const UserSchema = new mongoose.Schema({
   banned: { type: Boolean, default: false }
 });
 const User = mongoose.model('User', UserSchema);
+
+// ── CO-ADMIN SCHEMA (NEW) ──
+const CoAdminSchema = new mongoose.Schema({
+  username: { type: String, required: true, unique: true },
+  password: { type: String, required: true },
+  createdAt: { type: Date, default: Date.now }
+});
+const CoAdmin = mongoose.model('CoAdmin', CoAdminSchema);
 
 const OtpSchema = new mongoose.Schema({
   email: String,
@@ -43,6 +52,7 @@ async function sendOTP(email, otp) {
   });
 }
 
+// ── AUTH ROUTES ──
 app.post('/api/auth/send-otp', async (req, res) => {
   try {
     const { email } = req.body;
@@ -112,7 +122,7 @@ app.post('/api/auth/google', async (req, res) => {
   }
 });
 
-// Admin middleware
+// ── ADMIN MIDDLEWARE ──
 function adminAuth(req, res, next) {
   const token = req.headers.authorization?.split(' ')[1];
   if (!token) return res.status(401).json({ message: 'No token' });
@@ -126,7 +136,21 @@ function adminAuth(req, res, next) {
   }
 }
 
-// Admin login
+// ── CO-ADMIN MIDDLEWARE (NEW) ──
+function coAdminAuth(req, res, next) {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) return res.status(401).json({ message: 'No token' });
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    if (decoded.role !== 'coadmin') return res.status(403).json({ message: 'Not co-admin' });
+    req.coAdmin = decoded;
+    next();
+  } catch {
+    res.status(401).json({ message: 'Invalid token' });
+  }
+}
+
+// ── ADMIN ROUTES ──
 app.post('/api/admin/login', (req, res) => {
   const { password } = req.body;
   if (password !== process.env.ADMIN_PASSWORD) return res.status(401).json({ message: 'Wrong password' });
@@ -134,20 +158,17 @@ app.post('/api/admin/login', (req, res) => {
   res.json({ token });
 });
 
-// Admin stats
 app.get('/api/admin/stats', adminAuth, async (req, res) => {
   try {
     const totalUsers = await User.countDocuments();
     const bannedUsers = await User.countDocuments({ banned: true });
     const totalBalance = await User.aggregate([{ $group: { _id: null, total: { $sum: '$balance' } } }]);
-    const today = new Date(); today.setHours(0,0,0,0);
     res.json({ totalUsers, bannedUsers, totalBalance: totalBalance[0]?.total || 0 });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });
 
-// Get all users
 app.get('/api/admin/users', adminAuth, async (req, res) => {
   try {
     const users = await User.find({}, 'username email balance verified banned createdAt');
@@ -157,7 +178,6 @@ app.get('/api/admin/users', adminAuth, async (req, res) => {
   }
 });
 
-// Ban/unban user
 app.put('/api/admin/users/:id/ban', adminAuth, async (req, res) => {
   try {
     const user = await User.findById(req.params.id);
@@ -170,7 +190,6 @@ app.put('/api/admin/users/:id/ban', adminAuth, async (req, res) => {
   }
 });
 
-// Edit balance
 app.put('/api/admin/users/:id/balance', adminAuth, async (req, res) => {
   try {
     const { balance } = req.body;
@@ -181,6 +200,98 @@ app.put('/api/admin/users/:id/balance', adminAuth, async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 });
+
+// ── ADMIN → CO-ADMIN MANAGE ROUTES (NEW) ──
+
+// Co-Admin list
+app.get('/api/admin/coadmins', adminAuth, async (req, res) => {
+  try {
+    const coadmins = await CoAdmin.find({}, 'username createdAt');
+    res.json(coadmins);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Co-Admin add
+app.post('/api/admin/coadmin/add', adminAuth, async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    if (!username || !password) return res.status(400).json({ message: 'Username and password required' });
+    if (password.length < 6) return res.status(400).json({ message: 'Password must be 6+ characters' });
+    const exists = await CoAdmin.findOne({ username });
+    if (exists) return res.status(400).json({ message: 'Username already exists' });
+    const hashed = await bcrypt.hash(password, 10);
+    const coadmin = new CoAdmin({ username, password: hashed });
+    await coadmin.save();
+    res.json({ message: 'Co-Admin created!', username: coadmin.username });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Co-Admin delete
+app.delete('/api/admin/coadmin/:id', adminAuth, async (req, res) => {
+  try {
+    await CoAdmin.findByIdAndDelete(req.params.id);
+    res.json({ message: 'Co-Admin deleted' });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ── CO-ADMIN ROUTES (NEW) ──
+
+// Co-Admin login
+app.post('/api/coadmin/login', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    const coadmin = await CoAdmin.findOne({ username });
+    if (!coadmin) return res.status(400).json({ message: 'Invalid username or password' });
+    const match = await bcrypt.compare(password, coadmin.password);
+    if (!match) return res.status(400).json({ message: 'Invalid username or password' });
+    const token = jwt.sign({ role: 'coadmin', id: coadmin._id, username: coadmin.username }, process.env.JWT_SECRET, { expiresIn: '1d' });
+    res.json({ token, username: coadmin.username });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Co-Admin stats
+app.get('/api/coadmin/stats', coAdminAuth, async (req, res) => {
+  try {
+    const totalUsers = await User.countDocuments();
+    const bannedUsers = await User.countDocuments({ banned: true });
+    res.json({ totalUsers, bannedUsers });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Co-Admin get users
+app.get('/api/coadmin/users', coAdminAuth, async (req, res) => {
+  try {
+    const users = await User.find({}, 'username email balance banned');
+    res.json(users);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Co-Admin ban/unban
+app.put('/api/coadmin/users/:id/ban', coAdminAuth, async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    user.banned = !user.banned;
+    await user.save();
+    res.json({ message: user.banned ? 'User banned' : 'User unbanned', banned: user.banned });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ── USER ROUTES ──
 function authUser(req, res, next) {
   const token = req.headers.authorization?.split(' ')[1];
   if (!token) return res.status(401).json({ message: 'No token' });
@@ -202,6 +313,7 @@ app.get('/api/user/me', authUser, async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 });
+
 app.get('/', (req, res) => res.json({ message: 'MuniyaX Backend Running!' }));
 
 mongoose.connect(process.env.MONGODB_URI)
