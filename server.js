@@ -278,6 +278,18 @@ app.get('/api/coadmin/users', coAdminAuth, async (req, res) => {
   }
 });
 
+// Co-Admin balance edit
+app.put('/api/coadmin/users/:id/balance', coAdminAuth, async (req, res) => {
+  try {
+    const { balance } = req.body;
+    const user = await User.findByIdAndUpdate(req.params.id, { balance }, { new: true });
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    res.json({ message: 'Balance updated', balance: user.balance });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 // Co-Admin ban/unban
 app.put('/api/coadmin/users/:id/ban', coAdminAuth, async (req, res) => {
   try {
