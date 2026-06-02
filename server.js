@@ -59,8 +59,7 @@ app.post('/api/auth/send-otp', async (req, res) => {
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     await Otp.deleteMany({ email });
     await new Otp({ email, otp }).save();
-    await sendOTP(email, otp);
-    res.json({ message: 'OTP sent!' });
+    await sendOTP(email, o});res.json({ message: 'OTP sent!' });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -82,7 +81,7 @@ app.post('/api/auth/signup', async (req, res) => {
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
-});
+});o
 
 app.post('/api/auth/login', async (req, res) => {
   try {
@@ -176,7 +175,7 @@ app.get('/api/admin/users', adminAuth, async (req, res) => {
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
-});
+  });
 
 app.put('/api/admin/users/:id/ban', adminAuth, async (req, res) => {
   try {
@@ -325,7 +324,155 @@ app.get('/api/user/me', authUser, async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 });
+// ── DEPOSIT SCHEMA ──
+const DepositSchema = new mongoose.Schema({
+  userId: mongoose.Schema.Types.ObjectId,
+  userName: String,
+  userEmail: String,
+  amount: Number,
+  utr: String,
+  method: { type: String, default: 'UPI' },
+  status: { type: String, default: 'pending' }
+}, { timestamps: true });
+const Deposit = mongoose.model('Deposit', DepositSchema);
 
+// ── WITHDRAWAL SCHEMA ──
+const WithdrawalSchema = new mongoose.Schema({
+  userId: mongoose.Schema.Types.ObjectId,
+  userName: String,
+  userEmail: String,
+  amount: Number,
+  upiId: String,
+  status: { type: String, default: 'pending' }
+}, { timestamps: true });
+const Withdrawal = mongoose.model('Withdrawal', WithdrawalSchema);
+
+// ── ADMIN MIDDLEWARE ──
+const adminAuth = (req, res, next) => {
+  if (req.headers['x-admin-token'] !== process.env.ADMIN_TOKEN)
+    return res.status(403).json({ message: 'Admin access denied' });
+  next();
+};
+
+// ── USER: Submit Deposit ──
+app.post('/api/user/deposit', authUser, async (req, res) => {
+  try {
+    const { amount, utr, method } = req.body;
+    if (!amount || amount < 100) return res.status(400).json({ message: 'Minimum ₹100' });
+    if (!utr) return res.status(400).json({ message: 'UTR required' });
+    const user = await User.findById(req.userId);
+    const deposit = await Deposit.create({
+      userId: user._id, userName: user.username,
+      userEmail: user.email, amount, utr,
+      method: method || 'UPI', status: 'pending'
+    });
+    res.json({ message: 'Deposit submitted! Pending admin approval.', deposit });
+  } catch(e) { res.status(500).json({ message: e.message }); }
+});
+
+// ── USER: Submit Withdrawal ──
+app.post('/api/user/withdraw', authUser, async (req, res) => {
+  try {
+    const { amount, upiId } = req.body;
+    if (!amount || amount < 100) return res.status(400).json({ message: 'Minimum ₹100' });
+    const user = await User.findById(req.userId);
+    if (user.balance < amount) return res.status(400).json({ message: 'Insufficient balance' });
+    const wd = await Withdrawal.create({
+      userId: user._id, userName: user.username,
+      userEmail: user.email, amount, upiId, status: 'pending'
+    });
+    res.json({ message: 'Withdrawal submitted! Pending admin approval.', withdrawal: wd });
+  } catch(e) { res.status(500).json({ message: e.message }); }
+});
+
+// ── ADMIN: Get all users ──
+app.get('/api/admin/users', adminAuth, async (req, res) => {
+  const users = await User.find().select('-password').sort({ createdAt: -1 });
+  res.json({ data: users });
+});
+
+// ── ADMIN: Get all deposits ──
+app.get('/api/admin/deposits', adminAuth, async (req, res) => {
+  const deps = await Deposit.find().sort({ createdAt: -1 });
+  res.json({ data: deps });
+});
+
+// ── ADMIN: Approve deposit ──
+app.post('/api/admin/deposits/:id/approve', adminAuth, async (req, res) => {
+  try {
+    const dep = await Deposit.findById(req.params.id);
+    if (!dep || dep.status !== 'pending') return res.status(400).json({ message: 'Already processed' });
+    dep.status = 'approved';
+    await dep.save();
+    await User.findByIdAndUpdate(dep.userId, { $inc: { balance: dep.amount } });
+    res.json({ message: `✅ ₹${dep.amount} approved!` });
+  } catch(e) { res.status(500).json({ message: e.message }); }
+});
+
+// ── ADMIN: Reject deposit ──
+app.post('/api/admin/deposits/:id/reject', adminAuth, async (req, res) => {
+  try {
+    const dep = await Deposit.findById(req.params.id);
+    if (!dep || dep.status !== 'pending') return res.status(400).json({ message: 'Already processed' });
+    dep.status = 'rejected';
+    await dep.save();
+    res.json({ message: 'Deposit rejected' });
+  } catch(e) { res.status(500).json({ message: e.message }); }
+});
+
+// ── ADMIN: Get all withdrawals ──
+app.get('/api/admin/withdrawals', adminAuth, async (req, res) => {
+  const wds = await Withdrawal.find().sort({ createdAt: -1 });
+  const withBal = await Promise.all(wds.map(async w => {
+    const u = await User.findById(w.userId).select('balance');
+    return { ...w.toObject(), userBalance: u?.balance || 0 };
+  }));
+  res.json({ data: withBal });
+});
+
+// ── ADMIN: Approve withdrawal ──
+app.post('/api/admin/withdrawals/:id/approve', adminAuth, async (req, res) => {
+  try {
+    const wd = await Withdrawal.findById(req.params.id);
+    if (!wd || wd.status !== 'pending') return res.status(400).json({ message: 'Already processed' });
+    const user = await User.findById(wd.userId);
+    if (!user || user.balance < wd.amount) return res.status(400).json({ message: 'Insufficient balance' });
+    user.balance -= wd.amount;
+    await user.save();
+    wd.status = 'approved';
+    await wd.save();
+    res.json({ message: `✅ ₹${wd.amount} withdrawal approved!` });
+  } catch(e) { res.status(500).json({ message: e.message }); }
+});
+
+// ── ADMIN: Reject withdrawal ──
+app.post('/api/admin/withdrawals/:id/reject', adminAuth, async (req, res) => {
+  try {
+    const wd = await Withdrawal.findById(req.params.id);
+    if (!wd || wd.status !== 'pending') return res.status(400).json({ message: 'Already processed' });
+    wd.status = 'rejected';
+    await wd.save();
+    res.json({ message: 'Withdrawal rejected' });
+  } catch(e) { res.status(500).json({ message: e.message }); }
+});
+
+// ── ADMIN: Edit user balance ──
+app.post('/api/admin/users/:id/balance', adminAuth, async (req, res) => {
+  try {
+    const { balance } = req.body;
+    const user = await User.findByIdAndUpdate(req.params.id, { balance }, { new: true }).select('-password');
+    res.json({ message: 'Balance updated', user });
+  } catch(e) { res.status(500).json({ message: e.message }); }
+});
+
+// ── ADMIN: Ban/Unban user ──
+app.post('/api/admin/users/:id/ban', adminAuth, async (req, res) => {
+  try {
+    const { banned } = req.body;
+    const user = await User.findByIdAndUpdate(req.params.id, { banned }, { new: true }).select('-password');
+    res.json({ message: banned ? 'User banned' : 'User unbanned', user });
+  } catch(e) { res.status(500).json({ message: e.message }); }
+});
 app.get('/', (req, res) => res.json({ message: 'MuniyaX Backend Running!' }));
 
 mongoose.connect(process.env.MONGODB_URI)
