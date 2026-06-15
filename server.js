@@ -288,7 +288,52 @@ app.post('/api/admin/users/:id/ban', adminAuth, async (req, res) => {
     res.json({ message: banned ? 'User banned' : 'User unbanned', user });
   } catch(e) { res.status(500).json({ message: e.message }); }
 });
+// ── SPORTS PROXY ──
+const https = require('https');
 
+app.get('/api/sports/:sport', async (req, res) => {
+  const sport = req.params.sport;
+  const type  = req.query.type || 'live'; // live or upcoming
+  const SP_KEY = '37ed21fa467f2591ff129bac9e72a9a1';
+
+  const hostMap = {
+    football:   'v3.football.api-sports.io',
+    basketball: 'v1.basketball.api-sports.io',
+    mma:        'v1.mma.api-sports.io',
+    rugby:      'v1.rugby.api-sports.io'
+  };
+
+  const pathMap = {
+    football:   { live: '/fixtures?live=all', upcoming: '/fixtures?next=10&timezone=Asia/Kolkata' },
+    basketball: { live: '/games?live=all',    upcoming: '/games?date=' + new Date().toISOString().slice(0,10) },
+    mma:        { live: '/fights?live=all',   upcoming: '/fights?next=10' },
+    rugby:      { live: '/games?live=all',    upcoming: '/games?next=10' }
+  };
+
+  if(!hostMap[sport]) return res.status(400).json({ error: 'Unknown sport' });
+
+  const host = hostMap[sport];
+  const path = pathMap[sport][type] || pathMap[sport]['live'];
+
+  const options = {
+    hostname: host,
+    path: path,
+    method: 'GET',
+    headers: { 'x-apisports-key': SP_KEY }
+  };
+
+  const apiReq = https.request(options, (apiRes) => {
+    let data = '';
+    apiRes.on('data', chunk => data += chunk);
+    apiRes.on('end', () => {
+      try { res.json(JSON.parse(data)); }
+      catch(e) { res.status(500).json({ error: 'Parse error' }); }
+    });
+  });
+
+  apiReq.on('error', (e) => res.status(500).json({ error: e.message }));
+  apiReq.end();
+});
 app.get('/', (req, res) => res.json({ message: 'MuniyaX Backend Running! ✅' }));
 
 mongoose.connect(process.env.MONGODB_URI)
