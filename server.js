@@ -303,12 +303,14 @@ app.get('/api/sports/:sport', async (req, res) => {
     rugby:      'v1.rugby.api-sports.io'
   };
 
-  const pathMap = {
-    football:   { live: '/fixtures?live=all', upcoming: '/fixtures?next=10&timezone=Asia/Kolkata' },
-    basketball: { live: '/games?live=all',    upcoming: '/games?date=' + new Date().toISOString().slice(0,10) },
-    mma:        { live: '/fights?live=all',   upcoming: '/fights?next=10' },
-    rugby:      { live: '/games?live=all',    upcoming: '/games?next=10' }
-  };
+const today = new Date().toISOString().slice(0,10);
+
+const pathMap = {
+  football:   { live: '/fixtures?live=all', upcoming: '/fixtures?date=' + today + '&timezone=Asia/Kolkata' },
+  basketball: { live: '/games?live=all',    upcoming: '/games?date=' + today },
+  mma:        { live: '/fights?live=all',   upcoming: '/fights?date=' + today },
+  rugby:      { live: '/games?live=all',    upcoming: '/games?date=' + today }
+};
 
   if(!hostMap[sport]) return res.status(400).json({ error: 'Unknown sport' });
 
