@@ -304,10 +304,10 @@ app.get('/api/sports/:sport', async (req, res) => {
   };
 
   const pathMap = {
-    football:   { live: '/fixtures?live=all', upcoming: '/fixtures?next=10&timezone=Asia/Kolkata' },
+    football:   { live: '/fixtures?live=all', upcoming: '/fixtures?date=' + new Date().toISOString().slice(0,10) },
     basketball: { live: '/games?live=all',    upcoming: '/games?date=' + new Date().toISOString().slice(0,10) },
-    mma:        { live: '/fights?live=all',   upcoming: '/fights?next=10' },
-    rugby:      { live: '/games?live=all',    upcoming: '/games?next=10' }
+    mma:        { live: '/fights?live=all',   upcoming: '/fights?date=' + new Date().toISOString().slice(0,10) }
+    rugby:      { live: '/games?live=all',    upcoming: '/games?date=' + new Date().toISOString().slice(0,10) }
   };
 
   if(!hostMap[sport]) return res.status(400).json({ error: 'Unknown sport' });
