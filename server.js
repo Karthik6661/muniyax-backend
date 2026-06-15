@@ -294,7 +294,7 @@ const https = require('https');
 app.get('/api/sports/:sport', async (req, res) => {
   const sport = req.params.sport;
   const type  = req.query.type || 'live'; // live or upcoming
-  const SP_KEY = '37ed21fa467f2591ff129bac9e72a9a1';
+  const SP_KEY = process.env.SPORTS_API_KEY;
 
   const hostMap = {
     football:   'v3.football.api-sports.io',
