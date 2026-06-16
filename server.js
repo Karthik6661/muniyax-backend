@@ -170,7 +170,7 @@ app.get('/api/user/me', authUser, async (req, res) => {
   }
 });
 
-app.post('/api/user/deposit', authUser, async (req, res) => {
+app.post('/api/user/deposit',}authUser, async (req, res) => {
   try {
     const { amount, utr, method } = req.body;
     if (!amount || amount < 100) return res.status(400).json({ message: 'Minimum ₹100' });
@@ -287,54 +287,136 @@ app.post('/api/admin/users/:id/ban', adminAuth, async (req, res) => {
     if (!user) return res.status(404).json({ message: 'User not found' });
     res.json({ message: banned ? 'User banned' : 'User unbanned', user });
   } catch(e) { res.status(500).json({ message: e.message }); }
-});
+  });
 // ── SPORTS PROXY ──
 const https = require('https');
 
+const CRIC_API_KEY  = 'b43e3211-5811-4719-bd4b-fc2523fb745d';
+const FOOT_API_KEY  = 'efc33b989d414d0aa99a94dd6e19c53a';
+
+// ── Cricket via CricAPI ──
+async function fetchCricket(type) {
+  return new Promise((resolve) => {
+    const path = type === 'live'
+      ? '/api/v1/currentMatches?apikey=' + CRIC_API_KEY + '&offset=0'
+      : '/api/v1/matches?apikey='        + CRIC_API_KEY + '&offset=0';
+    const opts = { hostname: 'api.cricapi.com', path, method: 'GET', headers: { 'Content-Type': 'application/json' } };
+    const req = https.request(opts, (r) => {
+      let d = '';
+      r.on('data', c => d += c);
+      r.on('end', () => { try { resolve(JSON.parse(d)); } catch(e) { resolve(null); } });
+    });
+    req.on('error', () => resolve(null));
+    req.end();
+  });
+}
+
+// ── Football via Football-Data.org ──
+async function fetchFootball(type) {
+  return new Promise((resolve) => {
+    const today = new Date().toISOString().slice(0,10);
+    const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0,10);
+    const path = type === 'live'
+      ? '/v4/matches?status=IN_PLAY'
+      : '/v4/matches?dateFrom=' + today + '&dateTo=' + tomorrow;
+    const opts = {
+      hostname: 'api.football-data.org',
+      path, method: 'GET',
+      headers: { 'X-Auth-Token': FOOT_API_KEY }
+    };
+    const req = https.request(opts, (r) => {
+      let d = '';
+      r.on('data', c => d += c);
+      r.on('end', () => { try { resolve(JSON.parse(d)); } catch(e) { resolve(null); } });
+    });
+    req.on('error', () => resolve(null));
+    req.end();
+  });
+}
+
+// ── Mock data for Basketball / MMA / Rugby ──
+function getMockData(sport, type) {
+  const now = new Date();
+  const fmt = (h, m) => {
+    const d = new Date(); d.setHours(h, m, 0);
+    return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+  };
+  const mocks = {
+    basketball: {
+      live: [
+        { id:'b1', league:'NBA · Playoffs', home:'Lakers', away:'Warriors', score:'89', away_score:'94', minute:'Q3 4:32' },
+        { id:'b2', league:'NBA · Playoffs', home:'Celtics', away:'Heat',    score:'72', away_score:'68', minute:'Q2 1:15' }
+      ],
+      upcoming: [
+        { id:'b3', league:'NBA · Finals G2', home:'Thunder',  away:'Nuggets', minute: fmt(6,0)  },
+        { id:'b4', league:'NBA · Playoffs',  home:'Bucks',    away:'Sixers',  minute: fmt(8,30) }
+      ]
+    },
+    mma: {
+      live: [],
+      upcoming: [
+        { id:'m1', league:'UFC 310 · Main Event', home:'Adesanya', away:'Pereira',  minute: fmt(9,0)  },
+        { id:'m2', league:'UFC 310 · Co-Main',    home:'Gaethje',  away:'Holloway', minute: fmt(7,30) }
+      ]
+    },
+    rugby: {
+      live: [],
+      upcoming: [
+        { id:'r1', league:'Rugby World Cup · QF', home:'New Zealand',   away:'South Africa', minute: fmt(16,0) },
+        { id:'r2', league:'Six Nations · RD5',    home:'England',       away:'France',       minute: fmt(17,30) }
+      ]
+    }
+  };
+  return mocks[sport] ? mocks[sport][type] || [] : [];
+}
+
 app.get('/api/sports/:sport', async (req, res) => {
   const sport = req.params.sport;
-  const type  = req.query.type || 'live'; // live or upcoming
-  const SP_KEY = process.env.SPORTS_API_KEY;
+  const type  = req.query.type || 'live';
 
-  const hostMap = {
-    football:   'v3.football.api-sports.io',
-    basketball: 'v1.basketball.api-sports.io',
-    mma:        'v1.mma.api-sports.io',
-    rugby:      'v1.rugby.api-sports.io'
-  };
+  try {
+    // ── CRICKET ──
+    if (sport === 'cricket') {
+      const raw = await fetchCricket(type);
+      if (!raw || raw.status !== 'success' || !raw.data) return res.json({ response: [] });
+      const matches = raw.data.slice(0, 8).map((m, i) => ({
+        id: 'cr' + i,
+        league: m.series_name || m.matchType || 'Cricket',
+        home: m.teams && m.teams[0] ? m.teams[0] : 'Team A',
+        away: m.teams && m.teams[1] ? m.teams[1] : 'Team B',
+        score: m.score && m.score[0] ? m.score[0].r + '/' + m.score[0].w + ' (' + m.score[0].o + ' ov)' : '—',
+        away_score: m.score && m.score[1] ? m.score[1].r + '/' + m.score[1].w + ' (' + m.score[1].o + ' ov)' : '—',
+        minute: m.status || 'Live',
+        matchStarted: m.matchStarted,
+        matchEnded: m.matchEnded
+      }));
+      return res.json({ response: matches });
+    }
 
-const today = new Date().toISOString().slice(0,10);
+    // ── FOOTBALL ──
+    if (sport === 'football') {
+      const raw = await fetchFootball(type);
+      if (!raw || !raw.matches) return res.json({ response: [] });
+      const matches = raw.matches.slice(0, 8).map((m, i) => ({
+        id: 'fo' + i,
+        league: m.competition ? m.competition.name : 'Football',
+        home: m.homeTeam ? m.homeTeam.shortName || m.homeTeam.name : '?',
+        away: m.awayTeam ? m.awayTeam.shortName || m.awayTeam.name : '?',
+        score: m.score && m.score.fullTime ? String(m.score.fullTime.home ?? '—') : '—',
+        away_score: m.score && m.score.fullTime ? String(m.score.fullTime.away ?? '—') : '—',
+        minute: m.minute ? m.minute + "'" : (m.utcDate ? new Date(m.utcDate).toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit' }) : 'Soon'),
+        status: m.status
+      }));
+      return res.json({ response: matches });
+    }
 
-const pathMap = {
-  football:   { live: '/fixtures?live=all', upcoming: '/fixtures?date=' + today + '&timezone=Asia/Kolkata' },
-  basketball: { live: '/games?live=all',    upcoming: '/games?date=' + today },
-  mma:        { live: '/fights?live=all',   upcoming: '/fights?date=' + today },
-  rugby:      { live: '/games?live=all',    upcoming: '/games?date=' + today }
-};
+    // ── BASKETBALL / MMA / RUGBY (mock) ──
+    const mockList = getMockData(sport, type);
+    return res.json({ response: mockList });
 
-  if(!hostMap[sport]) return res.status(400).json({ error: 'Unknown sport' });
-
-  const host = hostMap[sport];
-  const path = pathMap[sport][type] || pathMap[sport]['live'];
-
-  const options = {
-    hostname: host,
-    path: path,
-    method: 'GET',
-    headers: { 'x-apisports-key': SP_KEY }
-  };
-
-  const apiReq = https.request(options, (apiRes) => {
-    let data = '';
-    apiRes.on('data', chunk => data += chunk);
-    apiRes.on('end', () => {
-      try { res.json(JSON.parse(data)); }
-      catch(e) { res.status(500).json({ error: 'Parse error' }); }
-    });
-  });
-
-  apiReq.on('error', (e) => res.status(500).json({ error: e.message }));
-  apiReq.end();
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 app.get('/', (req, res) => res.json({ message: 'MuniyaX Backend Running! ✅' }));
 
