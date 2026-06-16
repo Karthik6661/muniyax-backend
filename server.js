@@ -289,7 +289,7 @@ app.post('/api/admin/users/:id/ban', adminAuth, async (req, res) => {
   } catch(e) { res.status(500).json({ message: e.message }); }
   });
 // ── SPORTS PROXY ──
-const https = require('https');
+
 
 const CRIC_API_KEY  = 'b43e3211-5811-4719-bd4b-fc2523fb745d';
 const FOOT_API_KEY  = 'efc33b989d414d0aa99a94dd6e19c53a';
